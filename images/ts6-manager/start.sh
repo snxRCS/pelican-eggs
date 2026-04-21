@@ -48,6 +48,15 @@ echo "[start] prisma db push (idempotent)..."
     npx prisma db push --skip-generate || echo "[start] prisma db push failed - continuing"
 )
 
+# ---------- Seed default TS server connection from env (idempotent) ----------
+# Only seeds when TS_API_KEY is set and no TsServerConfig row exists yet.
+# Runs in the backend package dir so the compiled Prisma client resolves.
+echo "[start] Checking for default TS connection to seed..."
+(
+    cd /app/packages/backend
+    node /app/seed-connection.mjs || echo "[start] seed-connection failed - continuing"
+)
+
 # ---------- spawn sidecar ----------
 echo "[start] Launching Go sidecar on :${SIDECAR_PORT}..."
 SIDECAR_PORT="$SIDECAR_PORT" /usr/local/bin/sidecar &
@@ -80,7 +89,22 @@ shutdown() {
 }
 trap shutdown INT TERM
 
-echo "TS6-Manager ready on port ${SERVER_PORT}"
+# Figure out a sensible public base URL for the banner. The runtime does not
+# know the external host, so prefer FRONTEND_URL, then SERVER_IP:SERVER_PORT
+# (Pelican sets SERVER_IP to the allocation IP), then 0.0.0.0:SERVER_PORT.
+BANNER_URL="${FRONTEND_URL:-}"
+if [ -z "$BANNER_URL" ] && [ -n "${SERVER_IP:-}" ]; then
+    BANNER_URL="http://${SERVER_IP}:${SERVER_PORT}"
+fi
+BANNER_URL="${BANNER_URL:-http://0.0.0.0:${SERVER_PORT}}"
+
+echo ""
+echo "============================================================"
+echo "  TS6-Manager is ready on port ${SERVER_PORT}"
+echo "  Open in your browser:  ${BANNER_URL}/setup"
+echo "  (create the admin account on first visit)"
+echo "============================================================"
+echo ""
 
 # Run proxy+frontend in foreground so Wings sees the server as alive
 exec node /app/proxy.cjs

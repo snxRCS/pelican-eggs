@@ -80,6 +80,7 @@ COPY --from=proxy-builder /proxy/package.json /app/runtime_proxy/package.json
 # Start scripts live in /app and stay in the image
 COPY start.sh /app/start.sh
 COPY proxy.cjs /app/proxy.cjs
+COPY seed-connection.mjs /app/seed-connection.mjs
 RUN chmod +x /app/start.sh
 
 # Pelican-style container user (uid/gid 988) so Wings can exec as non-root

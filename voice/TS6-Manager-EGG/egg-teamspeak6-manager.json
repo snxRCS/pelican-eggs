@@ -8,7 +8,7 @@
     "name": "Teamspeak 6 Manager",
     "author": "snxrcsme@gmail.com",
     "uuid": "5b1e3f9e-0d7a-4f2a-9a4e-8b76c0f1d001",
-    "description": "Web-based management interface for TeamSpeak 6 servers by clusterzx. Ships as a pre-built GHCR image (ghcr.io/snxrcs/ts6-manager) that contains the React frontend, Express backend, and Go WebRTC sidecar. No build step on the Pelican server - the image is pulled and run directly.",
+    "description": "Web-based management interface for TeamSpeak 6 servers by clusterzx. Ships as a pre-built GHCR image (ghcr.io/snxrcs/ts6-manager) that contains the React frontend, Express backend, and Go WebRTC sidecar. No build step on the Pelican server - the image is pulled and run directly. Default TeamSpeak connection can be seeded from the variables below so users don't have to configure it in the UI.",
     "tags": [
         "voice",
         "web",
@@ -41,13 +41,13 @@
             "env_variable": "BACKEND_PORT",
             "default_value": "3001",
             "user_viewable": true,
-            "user_editable": true,
+            "user_editable": false,
             "rules": [
                 "required",
                 "integer",
                 "between:1024,65535"
             ],
-            "sort": 1
+            "sort": 10
         },
         {
             "name": "Sidecar Port",
@@ -55,17 +55,17 @@
             "env_variable": "SIDECAR_PORT",
             "default_value": "9800",
             "user_viewable": true,
-            "user_editable": true,
+            "user_editable": false,
             "rules": [
                 "required",
                 "integer",
                 "between:1024,65535"
             ],
-            "sort": 2
+            "sort": 11
         },
         {
             "name": "Frontend URL (CORS origin)",
-            "description": "Public URL users will open in their browser. Used as CORS origin on the backend. Example: https://ts6.example.com. Leave empty to let the image default to http://0.0.0.0:SERVER_PORT.",
+            "description": "Public URL users will open in their browser. Used as CORS origin on the backend. Example: https://ts6.example.com. Leave empty to default to http://SERVER_IP:SERVER_PORT.",
             "env_variable": "FRONTEND_URL",
             "default_value": "",
             "user_viewable": true,
@@ -75,11 +75,81 @@
                 "string",
                 "max:255"
             ],
-            "sort": 3
+            "sort": 12
+        },
+        {
+            "name": "TS Server Name",
+            "description": "Display name for the default TeamSpeak connection that will be pre-seeded into the UI. Only used on first boot.",
+            "env_variable": "TS_NAME",
+            "default_value": "My TeamSpeak Server",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": [
+                "nullable",
+                "string",
+                "max:64"
+            ],
+            "sort": 20
+        },
+        {
+            "name": "TS Host",
+            "description": "Hostname or IP of your TeamSpeak server. Example: 127.0.0.1 if it runs on the same node, or a public IP/domain.",
+            "env_variable": "TS_HOST",
+            "default_value": "127.0.0.1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": [
+                "nullable",
+                "string",
+                "max:255"
+            ],
+            "sort": 21
+        },
+        {
+            "name": "TS WebQuery Port",
+            "description": "HTTP WebQuery port of your TeamSpeak server (NOT the classic ServerQuery 10011). Default on TS6: 10080.",
+            "env_variable": "TS_WEBQUERY_PORT",
+            "default_value": "10080",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": [
+                "required",
+                "integer",
+                "between:1,65535"
+            ],
+            "sort": 22
+        },
+        {
+            "name": "TS API Key",
+            "description": "WebQuery API key (generated via apikeyadd in the TS server). If left empty, no connection is seeded and the user has to add one via the UI. If set, this connection is auto-created on first boot.",
+            "env_variable": "TS_API_KEY",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": [
+                "nullable",
+                "string",
+                "max:255"
+            ],
+            "sort": 23
+        },
+        {
+            "name": "TS Use HTTPS",
+            "description": "Whether the WebQuery uses HTTPS (TLS). Default: false. Set to true if your TS server has HTTPS enabled.",
+            "env_variable": "TS_USE_HTTPS",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": [
+                "required",
+                "string",
+                "in:true,false"
+            ],
+            "sort": 24
         },
         {
             "name": "Allow Self-Signed TS Certs",
-            "description": "Set to true if your TeamSpeak WebQuery uses a self-signed certificate. Default: false.",
+            "description": "Allow self-signed certificates for WebQuery HTTPS. Default: false.",
             "env_variable": "TS_ALLOW_SELF_SIGNED",
             "default_value": "false",
             "user_viewable": true,
@@ -89,7 +159,49 @@
                 "string",
                 "in:true,false"
             ],
-            "sort": 4
+            "sort": 25
+        },
+        {
+            "name": "TS SSH Port",
+            "description": "SSH ServerQuery port of your TeamSpeak server (only used for event-trigger bot flows). Default: 10022.",
+            "env_variable": "TS_SSH_PORT",
+            "default_value": "10022",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": [
+                "required",
+                "integer",
+                "between:1,65535"
+            ],
+            "sort": 30
+        },
+        {
+            "name": "TS SSH Username",
+            "description": "ServerQuery username for SSH (optional, only for event-trigger flows).",
+            "env_variable": "TS_SSH_USER",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": [
+                "nullable",
+                "string",
+                "max:64"
+            ],
+            "sort": 31
+        },
+        {
+            "name": "TS SSH Password",
+            "description": "ServerQuery password for SSH (optional, only for event-trigger flows). Stored encrypted.",
+            "env_variable": "TS_SSH_PASSWORD",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": [
+                "nullable",
+                "string",
+                "max:255"
+            ],
+            "sort": 32
         }
     ]
 }
