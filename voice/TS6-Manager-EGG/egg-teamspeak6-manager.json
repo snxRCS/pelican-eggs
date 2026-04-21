@@ -8,7 +8,7 @@
     "name": "Teamspeak 6 Manager",
     "author": "snxrcsme@gmail.com",
     "uuid": "5b1e3f9e-0d7a-4f2a-9a4e-8b76c0f1d001",
-    "description": "Web-based management interface for TeamSpeak 6 servers by clusterzx. Includes backend API, React frontend (served via internal proxy), and Go WebRTC sidecar for video streaming. All three services are started together using a supervised launcher.",
+    "description": "Web-based management interface for TeamSpeak 6 servers by clusterzx. Ships as a pre-built GHCR image (ghcr.io/snxrcs/ts6-manager) that contains the React frontend, Express backend, and Go WebRTC sidecar. No build step on the Pelican server - the image is pulled and run directly.",
     "tags": [
         "voice",
         "web",
@@ -17,11 +17,10 @@
     ],
     "features": [],
     "docker_images": {
-        "Node 20": "ghcr.io/parkervcp/yolks:nodejs_20",
-        "Node 22": "ghcr.io/parkervcp/yolks:nodejs_22"
+        "TS6-Manager (GHCR)": "ghcr.io/snxrcs/ts6-manager:latest"
     },
     "file_denylist": [],
-    "startup": "bash ./start.sh",
+    "startup": "bash /app/start.sh",
     "config": {
         "files": "{}",
         "startup": "{\r\n    \"done\": \"TS6-Manager ready on port\"\r\n}",
@@ -30,29 +29,15 @@
     },
     "scripts": {
         "installation": {
-            "script": "#!/bin/bash\n# TS6-Manager Pelican install script\n# Installs Node 20, Go 1.22, ffmpeg, builds all three services, writes start.sh + proxy.cjs.\n\nset -e\nexport DEBIAN_FRONTEND=noninteractive\n\necho \"=== TS6-Manager install: start ===\"\ndate -u\n\nREPO_URL=\"https://github.com/clusterzx/ts6-manager.git\"\nBRANCH=\"${BRANCH:-main}\"\nTARGET=\"/mnt/server\"\n\n# 1. Base system tools\necho \"[install] Installing base packages...\"\napt-get update\napt-get install -y --no-install-recommends \\\n    git curl wget ca-certificates xz-utils build-essential \\\n    ffmpeg python3 python3-pip tar gnupg openssl jq\n\n# 2. Node 20 via NodeSource if missing\nif ! command -v node >/dev/null 2>&1; then\n    echo \"[install] Installing Node.js 20 from NodeSource...\"\n    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -\n    apt-get install -y --no-install-recommends nodejs\nfi\necho \"[install] node: $(node -v), npm: $(npm -v)\"\n\n# 3. pnpm via corepack (comes with Node)\necho \"[install] Enabling pnpm via corepack...\"\ncorepack enable || npm install -g corepack\ncorepack prepare pnpm@9 --activate\necho \"[install] pnpm: $(pnpm -v)\"\n\n# 4. Go 1.22 (install manually to get current version)\necho \"[install] Installing Go 1.22.5...\"\nGO_VERSION=\"1.22.5\"\ncd /tmp\nrm -rf /tmp/go\nwget -q \"https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz\" -O /tmp/go.tar.gz\ntar -C /usr/local -xzf /tmp/go.tar.gz\nrm /tmp/go.tar.gz\nexport PATH=/usr/local/go/bin:$PATH\necho \"[install] go: $(go version)\"\n\n# 5. Clone repo\nmkdir -p \"$TARGET\"\ncd \"$TARGET\"\nif [ -d \".git\" ]; then\n    echo \"[install] Existing repo, pulling latest...\"\n    git fetch --all\n    git checkout \"$BRANCH\"\n    git pull\nelse\n    echo \"[install] Cloning $REPO_URL (branch $BRANCH)...\"\n    rm -rf /tmp/ts6_src\n    git clone --branch \"$BRANCH\" --depth 1 \"$REPO_URL\" /tmp/ts6_src\n    shopt -s dotglob nullglob\n    mv /tmp/ts6_src/* . 2>/dev/null || true\n    mv /tmp/ts6_src/.[!.]* . 2>/dev/null || true\n    rm -rf /tmp/ts6_src\nfi\n\n# 6. Install + build packages\necho \"[install] pnpm install...\"\npnpm install --no-frozen-lockfile\n\necho \"[install] Building @ts6/common...\"\npnpm --filter @ts6/common run build\n\necho \"[install] prisma generate...\"\npnpm --filter @ts6/backend exec prisma generate\n\necho \"[install] Building @ts6/backend...\"\npnpm --filter @ts6/backend run build\n\necho \"[install] Building @ts6/frontend...\"\npnpm --filter @ts6/frontend run build\n\n# 7. Build Go sidecar binary\necho \"[install] Building Go sidecar...\"\nmkdir -p \"$TARGET/bin\"\n( cd packages/sidecar && CGO_ENABLED=0 go build -ldflags='-s -w' -o \"$TARGET/bin/sidecar\" main.go )\nchmod +x \"$TARGET/bin/sidecar\"\necho \"[install] sidecar built: $(ls -la $TARGET/bin/sidecar)\"\n\n# 8. yt-dlp static binary\necho \"[install] Fetching yt-dlp...\"\ncurl -fsSL -o \"$TARGET/bin/yt-dlp\" https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux\nchmod +x \"$TARGET/bin/yt-dlp\"\n\n# 9. Runtime deps for proxy.cjs (simple npm, not pnpm workspace to avoid conflicts)\necho \"[install] Installing runtime proxy deps (express + http-proxy-middleware)...\"\nmkdir -p \"$TARGET/runtime_proxy\"\ncd \"$TARGET/runtime_proxy\"\ncat > package.json <<'PKGJSON'\n{\n  \"name\": \"ts6-manager-proxy\",\n  \"version\": \"1.0.0\",\n  \"private\": true,\n  \"dependencies\": {\n    \"express\": \"^4.19.2\",\n    \"http-proxy-middleware\": \"^3.0.0\"\n  }\n}\nPKGJSON\nnpm install --omit=dev --no-audit --no-fund --silent\ncd \"$TARGET\"\n\n# 10. Persistent dirs\nmkdir -p \"$TARGET/packages/backend/data\" \"$TARGET/data/music\"\n\n# 11. .env (first install only)\nif [ ! -f \"$TARGET/.env\" ]; then\n    echo \"[install] Generating .env with fresh secrets...\"\n    JWT_SECRET_VAL=$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)\n    ENCRYPTION_KEY_VAL=$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)\n    cat > \"$TARGET/.env\" <<EOF\nNODE_ENV=production\nJWT_SECRET=${JWT_SECRET_VAL}\nENCRYPTION_KEY=${ENCRYPTION_KEY_VAL}\nJWT_ACCESS_EXPIRY=15m\nJWT_REFRESH_EXPIRY=7d\nBACKEND_PORT=3001\nSIDECAR_PORT=9800\nDATABASE_URL=file:./data/ts6webui.db\nMUSIC_DIR=/home/container/data/music\nSIDECAR_URL=http://127.0.0.1:9800\nEOF\nfi\n\n# 12. Write start.sh\ncat > \"$TARGET/start.sh\" <<'STARTSH'\n#!/bin/bash\nset -u\ncd /home/container\n\nif [ -f .env ]; then\n    set -a\n    # shellcheck disable=SC1091\n    . ./.env\n    set +a\nfi\n\nexport PATH=\"/home/container/bin:${PATH}\"\nexport BACKEND_PORT=\"${BACKEND_PORT:-3001}\"\nexport SIDECAR_PORT=\"${SIDECAR_PORT:-9800}\"\nexport SIDECAR_URL=\"http://127.0.0.1:${SIDECAR_PORT}\"\nexport FRONTEND_URL=\"${FRONTEND_URL:-http://0.0.0.0:${SERVER_PORT}}\"\nexport DATABASE_URL=\"${DATABASE_URL:-file:./data/ts6webui.db}\"\nexport MUSIC_DIR=\"${MUSIC_DIR:-/home/container/data/music}\"\nexport PORT=\"${BACKEND_PORT}\"\n\nmkdir -p packages/backend/data \"$MUSIC_DIR\"\n\necho \"[start] prisma db push (idempotent)...\"\n( cd packages/backend && npx prisma db push --skip-generate || true )\n\necho \"[start] Launching Go sidecar on :${SIDECAR_PORT}...\"\nSIDECAR_PORT=\"$SIDECAR_PORT\" /home/container/bin/sidecar &\nSIDECAR_PID=$!\n\necho \"[start] Launching backend on :${BACKEND_PORT}...\"\n( cd packages/backend && node dist/index.js ) &\nBACKEND_PID=$!\n\nfor _ in $(seq 1 30); do\n    if (echo > /dev/tcp/127.0.0.1/\"$BACKEND_PORT\") 2>/dev/null; then\n        echo \"[start] Backend up on :$BACKEND_PORT\"\n        break\n    fi\n    sleep 1\ndone\n\ntrap 'kill -TERM $SIDECAR_PID $BACKEND_PID 2>/dev/null || true; exit 0' INT TERM\n\necho \"TS6-Manager ready on port ${SERVER_PORT}\"\nexec node /home/container/proxy.cjs\nSTARTSH\nchmod +x \"$TARGET/start.sh\"\n\n# 13. Write proxy.cjs\ncat > \"$TARGET/proxy.cjs\" <<'PROXYJS'\nconst path = require('path');\nconst express = require('/home/container/runtime_proxy/node_modules/express');\nconst { createProxyMiddleware } = require('/home/container/runtime_proxy/node_modules/http-proxy-middleware');\n\nconst PORT = parseInt(process.env.SERVER_PORT || '3000', 10);\nconst BACKEND = `http://127.0.0.1:${process.env.BACKEND_PORT || '3001'}`;\nconst STATIC_DIR = path.resolve('/home/container/packages/frontend/dist');\n\nconst app = express();\n\napp.use('/api', createProxyMiddleware({\n  target: BACKEND,\n  changeOrigin: true,\n  ws: true,\n  xfwd: true,\n}));\n\napp.use('/ws', createProxyMiddleware({\n  target: BACKEND,\n  changeOrigin: true,\n  ws: true,\n  xfwd: true,\n}));\n\napp.use(express.static(STATIC_DIR, { index: 'index.html' }));\n\napp.get('*', (req, res) => {\n  res.sendFile(path.join(STATIC_DIR, 'index.html'));\n});\n\nconst server = app.listen(PORT, '0.0.0.0', () => {\n  console.log(`[proxy] Frontend+API on 0.0.0.0:${PORT} -> backend ${BACKEND}`);\n});\nPROXYJS\n\necho \"[install] Files in $TARGET:\"\nls -la \"$TARGET\" | head -40\necho \"=== TS6-Manager install: done ===\"\ndate -u\n",
-            "container": "debian:bookworm-slim",
-            "entrypoint": "bash"
+            "script": "#!/bin/bash\n# TS6-Manager Pelican install script (thin variant).\n# All heavy lifting is done by the pre-built GHCR image\n# (ghcr.io/snxrcs/ts6-manager). This script only ensures\n# persistent directories exist.\n\nset -e\necho \"=== TS6-Manager (prebuilt image) install: start ===\"\ndate -u\n\nTARGET=\"/mnt/server\"\nmkdir -p \"${TARGET}/data/music\"\n\n# Nothing else to do. .env is generated on first boot by /app/start.sh.\necho \"[install] Data dirs ready. Start-up files live inside the image at /app/.\"\necho \"[install] The runtime image will auto-generate .env on first boot.\"\necho \"=== TS6-Manager install: done ===\"\ndate -u\n",
+            "container": "alpine:3.19",
+            "entrypoint": "ash"
         }
     },
     "variables": [
         {
-            "name": "Git Branch",
-            "description": "Git branch, tag, or commit to check out when installing (default: main).",
-            "env_variable": "BRANCH",
-            "default_value": "main",
-            "user_viewable": true,
-            "user_editable": true,
-            "rules": [
-                "required",
-                "string",
-                "max:64"
-            ],
-            "sort": 1
-        },
-        {
             "name": "Backend Port",
-            "description": "Internal port the Node.js backend listens on. Stays inside the container, not publicly reachable. Change only if it collides with something else.",
+            "description": "Internal port the Node.js backend listens on. Stays inside the container, not publicly reachable.",
             "env_variable": "BACKEND_PORT",
             "default_value": "3001",
             "user_viewable": true,
@@ -62,7 +47,7 @@
                 "integer",
                 "between:1024,65535"
             ],
-            "sort": 2
+            "sort": 1
         },
         {
             "name": "Sidecar Port",
@@ -76,40 +61,11 @@
                 "integer",
                 "between:1024,65535"
             ],
-            "sort": 3
-        },
-        {
-            "name": "JWT Secret",
-            "description": "Secret used to sign JWTs. Auto-generated on first install; rotate to invalidate all tokens.",
-            "env_variable": "JWT_SECRET",
-            "default_value": "change-me-auto-generated-on-install",
-            "user_viewable": true,
-            "user_editable": true,
-            "rules": [
-                "required",
-                "string",
-                "min:32",
-                "max:128"
-            ],
-            "sort": 4
-        },
-        {
-            "name": "Encryption Key",
-            "description": "Dedicated AES-256-GCM key for stored credential encryption (API keys, SSH passwords). Auto-generated on install. If unset, backend falls back to JWT_SECRET.",
-            "env_variable": "ENCRYPTION_KEY",
-            "default_value": "change-me-auto-generated-on-install",
-            "user_viewable": true,
-            "user_editable": true,
-            "rules": [
-                "nullable",
-                "string",
-                "max:128"
-            ],
-            "sort": 5
+            "sort": 2
         },
         {
             "name": "Frontend URL (CORS origin)",
-            "description": "Public URL users will open in their browser. Used as CORS origin on the backend. Example: https://ts6.example.com",
+            "description": "Public URL users will open in their browser. Used as CORS origin on the backend. Example: https://ts6.example.com. Leave empty to let the image default to http://0.0.0.0:SERVER_PORT.",
             "env_variable": "FRONTEND_URL",
             "default_value": "",
             "user_viewable": true,
@@ -119,7 +75,7 @@
                 "string",
                 "max:255"
             ],
-            "sort": 6
+            "sort": 3
         },
         {
             "name": "Allow Self-Signed TS Certs",
@@ -133,7 +89,7 @@
                 "string",
                 "in:true,false"
             ],
-            "sort": 7
+            "sort": 4
         }
     ]
 }

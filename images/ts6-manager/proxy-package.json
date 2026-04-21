@@ -1,0 +1,10 @@
+{
+  "name": "ts6-manager-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny static+API reverse proxy that fronts the TS6 Manager backend and serves the built React bundle on SERVER_PORT.",
+  "dependencies": {
+    "express": "^4.19.2",
+    "http-proxy-middleware": "^3.0.0"
+  }
+}
