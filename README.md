@@ -44,6 +44,17 @@ pelican-eggs/
 
 Keep the egg JSON, `install.sh`, and the image files in sync: a change in `images/<name>/` triggers a rebuild; a change in the egg JSON's `docker_images` needs to match the new image tag.
 
+## Private deployments
+
+If a GHCR package is set to private visibility, each Wings node must authenticate once so Docker can pull the image:
+
+```bash
+echo <PAT-with-read:packages> | docker login ghcr.io -u <username> --password-stdin
+```
+
+The PAT only needs the `read:packages` scope. Without this step, install will fail with `unauthorized: authentication required` on first image pull.
+
+
 ## License
 
 MIT. Individual upstream projects retain their own licenses.
